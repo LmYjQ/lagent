@@ -30,21 +30,22 @@ class LLMMixin:
 class BackendConfig:
     pass
 
-def dispatch(backend: Union[str, object], chat_template: str='jinja2 模板', path:str='', **kwargs):
+def dispatch(backend: Union[str, object], path:str='', model_name: Optional[str] = None, chat_template: str='jinja2 模板', **kwargs):
     if backend=='lmdeploy_server':
         return LMDeployServerBackend(
             path=path,
-                                model_name=kwargs.get('model_name'),
-                                server_name=kwargs.get('server_name', '0.0.0.0'),
-                                server_port=int(kwargs.get('server_port', 23333)),
-                                tp=int(kwargs.get('tp', 1)),
-                                **kwargs
+            model_name=model_name,
+            server_name=kwargs.get('server_name', '0.0.0.0'),
+            server_port=int(kwargs.get('server_port', 23333)),
+            tp=int(kwargs.get('tp', 1)),
+            # meta_template=chat_template,
+            **kwargs
         )
     elif backend=='lmdeploy_client':
         return LMDeployClientBackend(
-                                model_name=kwargs.get('model_name'),
-                                url=kwargs.get('url', '0.0.0.0:23333'),
-                                 **kwargs
+            model_name=kwargs.get('model_name'),
+            url=kwargs.get('url', '0.0.0.0:23333'),
+                **kwargs
         )
     
     elif backend=='transformer':
@@ -78,7 +79,7 @@ class LMDeployServerBackend(BaseLLM, LLMMixin):
         
     def chat_completion(self,
                     inputs: List[dict],
-                    session_id=0,
+                    session_id=2679,
                     sequence_start: bool = True,
                     sequence_end: bool = True,
                     stream: bool = True,
@@ -94,9 +95,10 @@ class LMDeployServerBackend(BaseLLM, LLMMixin):
         resp = ''
         finished = False
         stop_words = self.gen_params.get('stop_words')
-        for text in self.client.completions_v1(
+        print('stop_words:',stop_words)
+        for text in self.client.chat_completions_v1(
                 self.model_name,
-                prompt,
+                inputs,
                 session_id=session_id,
                 sequence_start=sequence_start,
                 sequence_end=sequence_end,
@@ -105,8 +107,7 @@ class LMDeployServerBackend(BaseLLM, LLMMixin):
                 skip_special_tokens=skip_special_tokens,
                 timeout=timeout,
                 **gen_params):
-            print('======text:',text)
-            resp += text['choices'][0]['text']
+            resp += text['choices'][0]['delta']['content']
             if not resp:
                 continue
             # remove stop_words
