@@ -30,21 +30,33 @@ class LLMMixin:
 class BackendConfig:
     pass
 
-def dispatch(backend: Union[str, object], chat_template: str='jinja2 模板', path:str='', **kwargs):
+def dispatch(backend: Union[str, object], 
+            path:str='', 
+            model_name: Optional[str] = None,
+            server_name: Optional[str] = '0.0.0.0',
+            server_port: Optional[int] = 23333,
+            url: Optional[str] = None,
+            api_keys: Optional[Union[List[str], str]] = None,
+            chat_template_config: Optional[dict] = dict(),
+            chat_template:str = None,
+            engine_config: Optional[dict] = dict(),
+            **kwargs):
     if backend=='lmdeploy_server':
         return LMDeployServerBackend(
             path=path,
-                                model_name=kwargs.get('model_name'),
-                                server_name=kwargs.get('server_name', '0.0.0.0'),
-                                server_port=int(kwargs.get('server_port', 23333)),
-                                tp=int(kwargs.get('tp', 1)),
-                                **kwargs
+            model_name=model_name,
+            server_name=server_name,
+            server_port=server_port,
+            serve_cfg = engine_config,
+            # tp=int(kwargs.get('tp', 1)),
+            # meta_template=chat_template,
+            **kwargs
         )
     elif backend=='lmdeploy_client':
         return LMDeployClientBackend(
-                                model_name=kwargs.get('model_name'),
-                                url=kwargs.get('url', '0.0.0.0:23333'),
-                                 **kwargs
+            model_name=kwargs.get('model_name'),
+            url=kwargs.get('url', '0.0.0.0:23333'),
+                **kwargs
         )
     
     elif backend=='transformer':
@@ -59,7 +71,6 @@ class LMDeployServerBackend(BaseLLM, LLMMixin):
                  model_name: Optional[str] = None,
                  server_name: str = '0.0.0.0',
                  server_port: int = 23333,
-                 tp: int = 1,
                  log_level: str = 'WARNING',
                  serve_cfg=dict(),
                  **kwargs):
@@ -72,13 +83,12 @@ class LMDeployServerBackend(BaseLLM, LLMMixin):
             model_name=model_name,
             server_name=server_name,
             server_port=server_port,
-            tp=tp,
             log_level=log_level,
             **serve_cfg)
         
     def chat_completion(self,
                     inputs: List[dict],
-                    session_id=0,
+                    session_id=2679,
                     sequence_start: bool = True,
                     sequence_end: bool = True,
                     stream: bool = True,
@@ -86,17 +96,19 @@ class LMDeployServerBackend(BaseLLM, LLMMixin):
                     skip_special_tokens: Optional[bool] = False,
                     timeout: int = 30,
                     **kwargs):
-        gen_params = self.update_gen_params(**kwargs)
-        max_new_tokens = gen_params.pop('max_new_tokens')
-        gen_params.update(max_tokens=max_new_tokens)
-        prompt = self.template_parser(inputs)
+        # gen_params = self.update_gen_params(**kwargs)
+        # max_new_tokens = gen_params.pop('max_new_tokens')
+        # gen_params.update(max_tokens=max_new_tokens)
+        # prompt = self.template_parser(inputs)
 
+        # finished = False
+        # stop_words = self.gen_params.get('stop_words')
+        # stop_words = gen_params.get('stop_words')
         resp = ''
-        finished = False
-        stop_words = self.gen_params.get('stop_words')
-        for text in self.client.completions_v1(
+
+        for text in self.client.chat_completions_v1(
                 self.model_name,
-                prompt,
+                inputs,
                 session_id=session_id,
                 sequence_start=sequence_start,
                 sequence_end=sequence_end,
@@ -104,20 +116,19 @@ class LMDeployServerBackend(BaseLLM, LLMMixin):
                 ignore_eos=ignore_eos,
                 skip_special_tokens=skip_special_tokens,
                 timeout=timeout,
-                **gen_params):
-            print('======text:',text)
-            resp += text['choices'][0]['text']
+                **kwargs):
+            resp += text['choices'][0]['delta']['content']
             if not resp:
                 continue
             # remove stop_words
-            for sw in stop_words:
-                if sw in resp:
-                    resp = filter_suffix(resp, stop_words)
-                    finished = True
-                    break
+            # for sw in stop_words:
+            #     if sw in resp:
+            #         resp = filter_suffix(resp, stop_words)
+            #         finished = True
+            #         break
             yield ModelStatusCode.STREAM_ING, resp, None
-            if finished:
-                break
+            # if finished:
+            #     break
         yield ModelStatusCode.END, resp, None
 
     def completion(self,
@@ -134,9 +145,9 @@ class LMDeployServerBackend(BaseLLM, LLMMixin):
             inputs = [inputs]
             batched = False
 
-        gen_params = self.update_gen_params(**kwargs)
-        max_new_tokens = gen_params.pop('max_new_tokens')
-        gen_params.update(max_tokens=max_new_tokens)
+        # gen_params = self.update_gen_params(**kwargs)
+        # max_new_tokens = gen_params.pop('max_new_tokens')
+        # gen_params.update(max_tokens=max_new_tokens)
 
         resp = [''] * len(inputs)
         for text in self.client.completions_v1(
@@ -149,7 +160,7 @@ class LMDeployServerBackend(BaseLLM, LLMMixin):
                 ignore_eos=ignore_eos,
                 skip_special_tokens=skip_special_tokens,
                 timeout=timeout,
-                **gen_params):
+                **kwargs):
             resp = [
                 resp[i] + item['text']
                 for i, item in enumerate(text['choices'])
