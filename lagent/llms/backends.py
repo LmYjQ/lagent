@@ -57,6 +57,9 @@ def dispatch(backend: Union[str, object],
             model_name=kwargs.get('model_name'),
             url=kwargs.get('url', '0.0.0.0:23333'),
                 **kwargs
+            model_name=kwargs.get('model_name'),
+            url=kwargs.get('url', '0.0.0.0:23333'),
+                **kwargs
         )
     
     elif backend=='transformer':
@@ -89,6 +92,7 @@ class LMDeployServerBackend(BaseLLM, LLMMixin):
     def chat_completion(self,
                     inputs: List[dict],
                     session_id=2679,
+                    session_id=2679,
                     sequence_start: bool = True,
                     sequence_end: bool = True,
                     stream: bool = True,
@@ -108,6 +112,7 @@ class LMDeployServerBackend(BaseLLM, LLMMixin):
 
         for text in self.client.chat_completions_v1(
                 self.model_name,
+                inputs,
                 inputs,
                 session_id=session_id,
                 sequence_start=sequence_start,
