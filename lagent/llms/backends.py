@@ -3,8 +3,26 @@ from typing import Dict, List, Optional, Tuple, Union
 from lagent.llms.base_llm import BaseLLM
 from lagent.schema import ModelStatusCode
 from lagent.utils.util import filter_suffix
+from jinja2 import Template
+
 
 class LLMMixin:
+    def render_chat(self, template, messages, bos_token="<s>", add_generation_prompt=False):
+        """
+        渲染聊天消息模板
+        
+        :param messages: 消息列表,每个消息是一个字典,包含'role'和'content'键
+        :param bos_token: 开始标记
+        :param add_generation_prompt: 是否添加生成提示
+        :return: 渲染后的字符串
+        """
+        template = Template(template)
+        return template.render(
+            messages=messages,
+            bos_token=bos_token,
+            add_generation_prompt=add_generation_prompt
+        )
+    
     def chat_completion(self,inputs: List[dict],
                     session_id=0,
                     sequence_start: bool = True,
@@ -48,15 +66,12 @@ def dispatch(backend: Union[str, object],
             server_name=server_name,
             server_port=server_port,
             serve_cfg = engine_config,
-            # tp=int(kwargs.get('tp', 1)),
-            # meta_template=chat_template,
+            chat_template_config = chat_template_config,
+            chat_template = chat_template,
             **kwargs
         )
     elif backend=='lmdeploy_client':
         return LMDeployClientBackend(
-            model_name=kwargs.get('model_name'),
-            url=kwargs.get('url', '0.0.0.0:23333'),
-                **kwargs
             model_name=kwargs.get('model_name'),
             url=kwargs.get('url', '0.0.0.0:23333'),
                 **kwargs
@@ -71,14 +86,18 @@ def dispatch(backend: Union[str, object],
     
 class LMDeployServerBackend(BaseLLM, LLMMixin):
     def __init__(self, path: str,
-                 model_name: Optional[str] = None,
-                 server_name: str = '0.0.0.0',
-                 server_port: int = 23333,
-                 log_level: str = 'WARNING',
-                 serve_cfg=dict(),
-                 **kwargs):
+                model_name: Optional[str] = None,
+                server_name: str = '0.0.0.0',
+                server_port: int = 23333,
+                log_level: str = 'WARNING',
+                chat_template_config: Optional[dict] = dict(),
+                chat_template:str = None,
+                serve_cfg=dict(),
+                **kwargs):
         super().__init__(path=path, **kwargs)
         self.model_name = model_name
+        self.chat_template_config = chat_template_config
+        self.chat_template = chat_template
         # TODO get_logger issue in multi processing
         import lmdeploy
         self.client = lmdeploy.serve(
@@ -91,7 +110,6 @@ class LMDeployServerBackend(BaseLLM, LLMMixin):
         
     def chat_completion(self,
                     inputs: List[dict],
-                    session_id=2679,
                     session_id=2679,
                     sequence_start: bool = True,
                     sequence_end: bool = True,
@@ -112,7 +130,6 @@ class LMDeployServerBackend(BaseLLM, LLMMixin):
 
         for text in self.client.chat_completions_v1(
                 self.model_name,
-                inputs,
                 inputs,
                 session_id=session_id,
                 sequence_start=sequence_start,
@@ -171,10 +188,52 @@ class LMDeployServerBackend(BaseLLM, LLMMixin):
                 for i, item in enumerate(text['choices'])
             ]
         # remove stop_words
-        resp = filter_suffix(resp, self.gen_params.get('stop_words'))
+        print('self.gen_params:',self.gen_params)
+        # resp = filter_suffix(resp, self.gen_params.get('stop_words'))
         if not batched:
             return resp[0]
         return resp
+    
+    def chat_completion_custom(self,
+            inputs: List[dict],
+            session_id=0,
+            sequence_start: bool = True,
+            sequence_end: bool = True,
+            stream: bool = True,
+            ignore_eos: bool = False,
+            skip_special_tokens: Optional[bool] = False,
+            timeout: int = 30,
+            **kwargs):
+        prompt = self.render_chat(template=self.chat_template,messages=inputs)
+        print(prompt)
+        stop_words = self.chat_template_config.get('stop_words')
+        resp = ''
+        finished = False
+
+        for text in self.client.completions_v1(
+                        self.model_name,
+                        prompt,
+                        session_id=session_id,
+                        sequence_start=sequence_start,
+                        sequence_end=sequence_end,
+                        stream=stream,
+                        ignore_eos=ignore_eos,
+                        skip_special_tokens=skip_special_tokens,
+                        timeout=timeout,
+                        **kwargs):
+            resp += text['choices'][0]['text']
+            if not resp:
+                continue
+            # remove stop_words
+            for sw in stop_words:
+                if sw in resp:
+                    resp = filter_suffix(resp, stop_words)
+                    finished = True
+                    break
+            yield ModelStatusCode.STREAM_ING, resp, None
+            if finished:
+                break
+        yield ModelStatusCode.END, resp, None
 
 class LMDeployClientBackend(LMDeployServerBackend):
     """
