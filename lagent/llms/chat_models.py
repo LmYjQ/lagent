@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional, Tuple, Union
 
-from lagent.llms.backends import LLMMixin, dispatch
+from lagent.llms.backends import LLMMixin, ModelClient
 
 
 INTERNLM2_TEMPLATE="{{ bos_token }}{% for message in messages %}{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}"
@@ -45,8 +45,10 @@ class Interlm2Chat(LLMMixin):
                 chat_template:str = None,
                 engine_config: Optional[dict] = None,
                 **kwargs):
-        self.model = dispatch(backend=backend, path=path, model_name=model_name, chat_template=chat_template, engine_config=engine_config, chat_template_config=chat_template_config, **kwargs)
-    
+        self.modelClient = ModelClient(backend=backend, path=path, model_name=model_name, url=url, api_keys=api_keys,
+                                       chat_template=chat_template, engine_config=engine_config, chat_template_config=chat_template_config, **kwargs)
+        self.model = self.modelClient.client
+
     def completion(self,
                  inputs: Union[str, List[str]],
                  session_id: int = 2967,
@@ -80,6 +82,8 @@ class Qwen2Chat(LLMMixin):
 
 if __name__==  '__main__':
     root_path = '/mnt/datawow/lyq/model/' 
+    root_path = '/Users/qiyusama/Documents/work/model/' 
+
     # model_name = 'internlm2_5-7b-chat'
     model_name = 'internlm2-chat-1_8b'
 
@@ -87,17 +91,45 @@ if __name__==  '__main__':
     engine_config = dict(tp=1
                         #  ,session_len=1024
                          )
-    # for backend in ['lmdeploy_server','lmdeploy_clinet','transformer','api']:
-    backend = 'lmdeploy_server'
-    custom = True
-    if custom:
-        chat_obj = Interlm2Chat(backend=backend,path=path,model_name=model_name,
-                                engine_config = engine_config,chat_template=INTERNLM2_TEMPLATE
-                                )
-    else:
-        chat_obj = Interlm2Chat(backend=backend,path=path,model_name=model_name,
-                engine_config = engine_config
-                )
+    backend = 'huggingface'
+    custom = False
+    generation_config_init = dict(top_p=0.8,
+                            top_k=1,
+                            temperature=0,
+                            max_new_tokens=8192,
+                            repetition_penalty=1.02,
+                            stop_words=['<|im_end|>']
+            )
+    if backend == 'lmdeploy_server':
+        if custom:
+            chat_obj = Interlm2Chat(backend=backend,path=path,model_name=model_name,
+                                    engine_config = engine_config,chat_template=INTERNLM2_TEMPLATE
+                                    )
+        else:
+            chat_obj = Interlm2Chat(backend=backend,path=path,model_name=model_name,
+                    engine_config = engine_config
+                    )
+    silicon_key = 'xxxxxxxxxxxxxx'            
+    if backend == 'api':
+        chat_obj = Interlm2Chat(backend='api',model_type='internlm/internlm2_5-7b-chat',
+                                url='https://api.siliconflow.cn/v1/chat/completions',
+                                api_keys=silicon_key,
+                                meta_template=[
+                                dict(role='system', api_role='system'),
+                                dict(role='user', api_role='user'),
+                                dict(role='assistant', api_role='assistant'),
+                                dict(role='environment', api_role='system')
+                                ],
+                                engine_config = engine_config,
+                                generation_config_init = generation_config_init
+            )  
+
+    if backend == 'huggingface':
+        chat_obj = Interlm2Chat(backend='huggingface',path=path,
+                                engine_config = engine_config,
+                                chat_template=INTERNLM2_TEMPLATE,
+                                generation_config_init = generation_config_init
+        )
     str_prompt = '介绍一下你自己'
     dict_prompt = [
 {"role": "system", "content": "你是一个有用的AI助手，专门解答与Python编程相关的问题。"},
@@ -107,15 +139,16 @@ if __name__==  '__main__':
                     top_k=1,
                     temperature=0,
                     repetition_penalty=1.02,
-                    max_token=10240,
+                    # max_tokens=10240,
             )
     print(f'============completion test===============')
-    output = chat_obj.completion(str_prompt, **generation_config)
-    print(output)
+    # output = chat_obj.completion(str_prompt, **generation_config)
+    # print(output)
 
     print(f'============chat_completion test===============')
     output_gen = chat_obj.chat_completion(dict_prompt, **generation_config)
+    # print('output:',output_gen)
     for item in output_gen:
         output=item
-    print(output)
+        print('output:',output)
 
